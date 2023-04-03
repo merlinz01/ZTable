@@ -1,7 +1,8 @@
 import random
 import sys
 from gui32.backend import winapi, wintypes
-from gui32.button import Button
+from gui32.button import Button, CheckBox
+from gui32.colorchooser import ChooseColor
 from gui32.edit import Edit
 from gui32.toplevel import Toplevel
 from ztable import *
@@ -19,7 +20,7 @@ blueb = winapi.CreateSolidBrush(0xff8080)
 
 people = (
     ('George Washington', red, lgreen, blueb),
-    ('John Adams', blue, lred,greenb),
+    ('John Adams', blue, lred, greenb),
     ('Thomas Jefferson', green, lblue, redb),
 )
 
@@ -29,15 +30,21 @@ class ZTableDemoWindow(Toplevel):
         Toplevel.__init__(self, width=700, height=500, title='ZTable Demo')
         self.zt = ZTable(self)
         self.zt.SetEmptyText("This is a demo ZTable, and it currently has no items visible. :)")
+        self.colorchooser = Button(self.zt, command=self.OnChooseColor, text='Choose color...')
+        self.checker = CheckBox(self.zt, command=self.OnCheck)
         self.zt.SetColumns(
             self.zt.MakeColumn(width=20, flags=ZTC_SELECTOR),
             self.zt.MakeColumn(headerText='Name', width=150,
                                flags=ZTC_DEFAULTSORT | ZTC_NOTIFYDBLCLICKS | ZTC_ALIGN_RIGHT | ZTC_CUSTOMFG),
             self.zt.MakeColumn(headerText='Color', width=100,
                                flags=ZTC_CUSTOMBG | ZTC_ALIGN_CENTER | ZTC_EDITABLE | ZTC_SINGLECLICKEDIT),
+            self.zt.MakeColumn(headerText='Custom editor', width=150, editWin=self.colorchooser,
+                               flags=ZTC_EDITABLE | ZTC_SINGLECLICKEDIT | ZTC_CUSTOMEDITOR),
+            self.zt.MakeColumn(headerText='Oh?', width=30, editWin=self.checker,
+                               flags=ZTC_EDITABLE | ZTC_SINGLECLICKEDIT | ZTC_CUSTOMEDITOR),
         )
         for ir, (name, color, lcolor, bg) in enumerate(people):
-            self.zt.InsertRow(ir, '', (name, color), ('#%06x' % color, bg))
+            self.zt.InsertRow(ir, '', (name, color), ('#%06x' % color, bg), '#%06x' % lcolor, 'Yes!')
         self.zt.OnDoubleClick = self.OnDoubleClickTable
         self.zt.OnEditStart = self.OnEditStart
         self.zt.OnEditEnd = self.OnEditEnd
@@ -48,9 +55,9 @@ class ZTableDemoWindow(Toplevel):
         Button(self, text='Unhide all', command=self.UnhideAll, x=110, y=5, height=25, width=100)
 
     def AddRow(self):
-        ir = len(self.zt)-1
+        ir = len(self.zt) - 1
         name, color, lcolor, bg = random.choice(people)
-        self.zt.InsertRow(ir, '', (name, color), ('#%06x' % color, bg))
+        self.zt.InsertRow(ir, '', (name, color), ('#%06x' % color, bg), 'Yes!')
 
     def UnhideAll(self):
         for i in range(len(self.zt)):
@@ -60,18 +67,25 @@ class ZTableDemoWindow(Toplevel):
         self.zt.SetRowFiltered(ir, False)
 
     def OnEditStart(self, ir, ic, edit_hwnd):
-        pass
+        self.editRow = ir
+        if ic == 4:
+            self.checker.Checked = self.zt.GetItemText(ir, ic) == 'Yes!'
 
     def OnEditEnd(self, ir, ic, edit_hwnd):
-        e = Edit.from_handle(edit_hwnd)
-        text = e.Text.removeprefix('#')
-        try:
-            color = int(text, 16) % 0x1000000
-        except ValueError:
-            self.ShowError('Invalid color value!')
-            return True
-        self.zt.SetItemParam(ir, 'Name', color)
-        e.Text = '#%06x' % color
+        if ic == 2:
+            e = Edit.from_handle(edit_hwnd)
+            text = e.Text.removeprefix('#')
+            try:
+                color = int(text, 16) % 0x1000000
+            except ValueError:
+                self.ShowError('Invalid color value!')
+                return True
+            self.zt.SetItemParam(ir, 'Name', color)
+            e.Text = '#%06x' % color
+        elif ic == 3:
+            return False
+        elif ic == 4:
+            return False
         return False
 
     def OnAutoNewRow(self, ir):
@@ -80,6 +94,20 @@ class ZTableDemoWindow(Toplevel):
         self.zt.SetItemParam(ir, 'Name', color)
         self.zt.SetItemText(ir, 'Color', '#%06x' % color)
         self.zt.SetItemParam(ir, 'Color', bg)
+        self.zt.SetItemText(ir, 'Oh?', 'Yes!')
+
+    def OnChooseColor(self):
+        color = self.zt.GetItemParam(self.editRow, 'Name')
+        color = ChooseColor(self, color)
+        if color is not None:
+            self.zt.SetItemText(self.editRow, 'Color', '#%06x' % color)
+            self.zt.SetItemParam(self.editRow, 'Name', color)
+            winapi.SetProp(self.colorchooser._h, "ZTableModified", 1)
+
+    def OnCheck(self):
+        t = ('No!', 'Yes!')[self.checker.Checked]
+        self.zt.SetItemText(self.editRow, 'Oh?', t)
+        winapi.SetProp(self.checker._h, "ZTableModified", 1)
 
     def OnResize(self, width, height):
         try:

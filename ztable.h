@@ -32,6 +32,7 @@ typedef struct tagZTableColumn {
     USHORT maxWidth;
     USHORT defaultWidth;
     USHORT flags;
+    HWND editWin;
 } ZTableColumn;
 
 typedef struct tagZTableItem {
@@ -66,6 +67,7 @@ typedef struct tagZTableData {
     HRGN rowsClipRgn;
     /* Edit window */
     HWND editWin;
+    HWND currentEditWin;
     BYTE inEditing;
     SHORT editRow;
     SHORT editCol;
@@ -218,6 +220,7 @@ BOOL ZTableUpdateScrollInfo(ZTableData*);
 #define ZTN_DBLCLICKITEM (ZTN_FIRST-4)
 #define ZTN_RCLICK (ZTN_FIRST-5)
 #define ZTN_AUTONEWROW (ZTN_FIRST-6)
+#define ZTN_EDITORCOMMAND (ZTN_FIRST-7)
 
 /* Column flags */
 #define ZTC_ALIGN_LEFT      0x0000
@@ -234,8 +237,9 @@ BOOL ZTableUpdateScrollInfo(ZTableData*);
 #define ZTC_CUSTOMFG        0x0400
 #define ZTC_SELECTOR        0x0800
 #define ZTC_SINGLECLICKEDIT 0x1000
-#define ZTC_SLOWDCLICKEDIT  0x2000
+#define ZTC_DELAYCLICKEDIT  0x2000
 #define ZTC_DOUBLECLICKEDIT 0x4000
+#define ZTC_CUSTOMEDITOR    0x8000
 
 /*** Error enum - not implemented ***/
 /*enum ZTableError {

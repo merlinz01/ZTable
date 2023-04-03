@@ -19,7 +19,9 @@ class ZTableColumn(ctypes.Structure):
         ('minWidth', wintypes.USHORT),
         ('maxWidth', wintypes.USHORT),
         ('defaultWidth', wintypes.USHORT),
-        ('flags', wintypes.USHORT))
+        ('flags', wintypes.USHORT),
+        ('editWin', wintypes.HWND),
+    )
 
 
 class ZTableItem(ctypes.Structure):
@@ -37,6 +39,7 @@ class ZTableRow(ctypes.Structure):
         ('items', LPZTableItem),
         ('hFill', wintypes.HBRUSH),
         ('textColor', wintypes.COLORREF),
+        ('filtered', wintypes.BOOL),
         ('index', wintypes.SHORT),
         ('indexFiltered', wintypes.SHORT))
 
@@ -71,6 +74,7 @@ ZTN_HEADERCLICKED = ZTN_FIRST - 3
 ZTN_DBLCLICKITEM = ZTN_FIRST - 4
 ZTN_RCLICK = ZTN_FIRST - 5
 ZTN_AUTONEWROW = ZTN_FIRST - 6
+ZTN_EDITORCOMMAND = ZTN_FIRST - 7
 
 ZTC_ALIGN_LEFT = 0x0000
 ZTC_ALIGN_CENTER = 0x0001
@@ -88,6 +92,7 @@ ZTC_SELECTOR = 0x0800
 ZTC_SINGLECLICKEDIT = 0x1000
 ZTC_SLOWDCLICKEDIT = 0x2000
 ZTC_DOUBLECLICKEDIT = 0x4000
+ZTC_CUSTOMEDITOR = 0x8000
 
 __all__ = [
     'ZTable',
@@ -97,6 +102,7 @@ __all__ = [
     'ZTN_HEADERCLICKED',
     'ZTN_DBLCLICKITEM',
     'ZTN_RCLICK',
+    'ZTN_AUTONEWROW',
     'ZTC_ALIGN_LEFT',
     'ZTC_ALIGN_CENTER',
     'ZTC_ALIGN_RIGHT',
@@ -113,6 +119,7 @@ __all__ = [
     'ZTC_SINGLECLICKEDIT',
     'ZTC_DOUBLECLICKEDIT',
     'ZTC_SLOWDCLICKEDIT',
+    'ZTC_CUSTOMEDITOR',
 ]
 
 
@@ -143,6 +150,7 @@ class ZTable(ChildWindow):
         self.OnEditEnd = None
         self.OnHeaderClicked = None
         self.OnAutoNewRow = None
+        self._command_handlers = {}
 
     def _on_parent_notify(self, pnmh):
         nm = ctypes.cast(pnmh, LPNM_ZTABLE).contents
@@ -165,7 +173,19 @@ class ZTable(ChildWindow):
         elif code == ZTN_AUTONEWROW:
             if self.OnAutoNewRow:
                 self.OnAutoNewRow(nm.ir)
+        elif code == ZTN_EDITORCOMMAND:
+            idCtrl = winapi.LOWORD(nm.location.x)
+            func = self._command_handlers.get(idCtrl, None)
+            if func is not None:
+                return func(winapi.HIWORD(nm.location.x), idCtrl, nm.location.y)
+            return 1
         return 0
+
+    def attach_command(self, idCtrl, func):
+        self._command_handlers[idCtrl] = func
+
+    def unattach_command(self, idCtrl):
+        del self._command_handlers[idCtrl]
 
     def _msg(self, msg, wParam, lParam, errcheck=True):
         res = self.SendMessage(msg, wParam, lParam)
@@ -224,7 +244,7 @@ class ZTable(ChildWindow):
         """Returns the user-defined value for the specified cell"""
         p = wintypes.LPARAM()
         col = self._col(col)
-        self._msg(0x744, winapi.MAKELONG(row, col), ctypes.addressof(p))
+        self._msg(0x745, winapi.MAKELONG(row, col), ctypes.addressof(p), False)
         return p.value
     GetItemLParam = GetItemParam
 
@@ -264,7 +284,7 @@ class ZTable(ChildWindow):
         return index
 
     @staticmethod
-    def MakeColumn(headerText='', width=100, minWidth=10, maxWidth=0xffff, defaultWidth=None, flags=0):
+    def MakeColumn(headerText='', width=100, minWidth=10, maxWidth=0xffff, defaultWidth=None, editWin=None, flags=0):
         """Returns a column structure for passing to `SetColumns()`.
             `headerText` is the text to display on the column header.
             `width` is the initial column width in pixels.
@@ -272,6 +292,7 @@ class ZTable(ChildWindow):
             `maxWidth` is the maximum width in pixels for resizable columns.
             `defaultWidth` is the width in pixels that columns with `ZTC_DEFSIZEONRCLICK`
                 are set to when the header is right-clicked.
+            `editWin` is a custom editing window for this column if it has `ZTC_CUSTOMEDITOR`
             `flags` is a combination of `ZTC_*` constants
         """
         col = ZTableColumn()
@@ -282,6 +303,7 @@ class ZTable(ChildWindow):
         col.maxWidth = maxWidth
         col.defaultWidth = defaultWidth or width
         col.flags = flags
+        col.editWin = getattr(editWin, '_h', editWin)
         return col
 
     @property

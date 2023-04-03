@@ -298,13 +298,44 @@ This means that `\r\n` line separators will cause line breaks.
 Due to the limited capabilities of the Win32 `DrawText` function, the text will not be vertically centered.
 This feature is obviously only useful in conjunction with custom line height.
 
+### New row generation
+
+If you turn on automatic row generation:
+```python
+table.SetAutoMakeNewRow(True)
+```
+then when an editing procedure has successfully finished in the last row in the table, 
+a new row is appended to the table.
+The table sends a notification when it adds a row so that you can customize the contents of each new row.
+To handle this notification:
+
+```python
+class YourWindow(Toplevel):
+    def __init__(self):
+        ...
+        self.table.OnAutoNewRow = self.OnAutoNewRow
+        ...
+
+    def OnAutoNewRow(self, row_index):
+        self.table.SetItemText(row_index, 0, 'This row was added.')
+```
+
+### Row selector column
+
+If the first column has `ZTC_SELECTOR`, it is displayed without cell text, with a uniform fill color, and with an arrow in the currently selected row.
+If new-row generation is enabled, it displays a `*` icon in the last row.
+```python
+table.SetColumns(
+    table.MakeColumn(flags=ZTC_SELECTOR),
+    ...
+)
+```
+
 ## To Do
 
 - Allow setting default row colors
 - Keybinding to start editing
-- Right-side row selector with configurable automatic new-row generation - done!
-- Single-click or Windows-style slow double click to start editing - done!
-- Custom editing widgets (e.g., checkbuttons, color pickers)
+- Custom editing widgets - mostly done!
 - Icons and bitmaps (at least check marks) - supported a tiny bit for selector column
 - Combined custom background and text color per cell - should be easy
 - Custom borders per cell?

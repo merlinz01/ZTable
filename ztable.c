@@ -22,23 +22,17 @@
 #define or ||
 #define not !
 
-#define NOEDITSUBCLASS
-
 LRESULT CALLBACK ZTableWindowProcedure(HWND, UINT, WPARAM, LPARAM);
 
-#ifdef NOEDITSUBCLASS
-
-LRESULT CALLBACK ZTableEditWindowProcedure(HWND, UINT, WPARAM, LPARAM);
-
-#else
-LRESULT CALLBACK ZTableEditSubclassProc(
-    HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
-#endif // NOEDITSUBCLASS
+LRESULT CALLBACK ZTableEditorSubclassProc(
+    HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 INT CALLBACK ZTableDefaultSortProc(HWND hwnd, ZTableRow *row1, ZTableRow *row2, SHORT ic, LPARAM lParam);
 
 LRESULT ZTableNotifyParent(
         ZTableData *self, UINT code, SHORT ir, SHORT ic, LONG x, LONG y, LPVOID data);
+
+LRESULT ZTable_WM_COMMAND(ZTableData *self, WPARAM wParam, LPARAM lParam);
 
 LRESULT ZTable_WM_DESTROY(ZTableData *self, WPARAM wParam, LPARAM lParam);
 
@@ -185,6 +179,8 @@ LRESULT CALLBACK ZTableWindowProcedure(HWND hwnd, UINT message, WPARAM wParam, L
             ZTableUpdateScrollInfo(self);
             return 0;
 #undef CHECK
+        case WM_COMMAND:
+            return ZTable_WM_COMMAND(SELF, wParam, lParam);
         case WM_DESTROY:
             return ZTable_WM_DESTROY(SELF, wParam, lParam);
         case WM_GETDLGCODE:
@@ -276,7 +272,7 @@ LRESULT CALLBACK ZTableWindowProcedure(HWND hwnd, UINT message, WPARAM wParam, L
 
 #undef SELF
 
-#define CHECK(v) if (!(v)) {printf("CHECK(" #v ") failed\n"); return FALSE;}
+#define CHECK(v) if (!(v)) {printf("CHECK(" #v ") failed, line %i\n", __LINE__); return FALSE;}
 //#define CHECK_E(v, err) if (!(v)) {printf("CHECK("  #v ") failed\n"); self->lastError=err; return FALSE;}
 
 BOOL ZTableBeginEditing(ZTableData *self, SHORT ir, SHORT ic) {
@@ -285,41 +281,50 @@ BOOL ZTableBeginEditing(ZTableData *self, SHORT ir, SHORT ic) {
     CHECK(ZTableSeeColumn(self, ic));
     RECT rect;
     CHECK(ZTableGetCellRect(self, &rect, ir, ic));
-    if (self->editWin == NULL) {
-        CHECK(self->editWin = CreateWindowEx(
-                WS_EX_CLIENTEDGE, WC_EDIT, NULL,
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-                0, 0, 0, 0, self->hwnd, NULL, NULL, NULL));
-#ifdef NOEDITSUBCLASS
-        HANDLE oldWndProc = (HANDLE) SetWindowLongPtr(
-                self->editWin, GWLP_WNDPROC, (LONG_PTR) ZTableEditWindowProcedure);
-        CHECK(oldWndProc);
-        CHECK(SetProp(self->editWin, _T("OLDWP"), (HANDLE) oldWndProc));
-        CHECK(SetProp(self->editWin, _T("ZTABLE"), self->hwnd));
-#else
-        CHECK(SetWindowSubclass(self->hwnd, ZTableEditSubclassProc, 0, (DWORD_PTR)self->hwnd));
-#endif // NOEDITSUBCLASS
-        SendMessage(self->editWin, WM_SETFONT, (WPARAM) self->rowFont, 0);
-        SendMessage(self->editWin, EM_SETMARGINS,
-                    EC_LEFTMARGIN | EC_RIGHTMARGIN,
-                    MAKELPARAM(self->textPadX - 3, self->textPadX - 3));
+    if (self->columns[ic].flags & ZTC_CUSTOMEDITOR and self->columns[ic].editWin != NULL) {
+        self->currentEditWin = self->columns[ic].editWin;
+        if (!GetProp(self->currentEditWin, _T("ZTableSubclassed"))) {
+            LONG oldWndProc;
+            CHECK(oldWndProc = SetWindowLongPtr(
+                    self->currentEditWin, GWLP_WNDPROC, (LONG_PTR) ZTableEditorSubclassProc));
+            SetWindowLongPtr(self->currentEditWin, GWLP_USERDATA, oldWndProc);
+            CHECK(SetProp(self->currentEditWin, _T("ZTableSubclassed"), (HANDLE)1));
+        }
+        CHECK(SetProp(self->currentEditWin, _T("ZTableModified"), (HANDLE)0));
+    } else {
+        if (self->editWin == NULL) {
+            CHECK(self->editWin = CreateWindowEx(
+                    WS_EX_CLIENTEDGE, WC_EDIT, NULL,
+                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                    0, 0, 0, 0, self->hwnd, NULL, NULL, NULL));
+            LONG oldWndProc;
+            CHECK(oldWndProc = SetWindowLongPtr(
+                    self->editWin, GWLP_WNDPROC, (LONG_PTR) ZTableEditorSubclassProc));
+            SetWindowLongPtr(self->editWin, GWLP_USERDATA, oldWndProc);
+            CHECK(SetProp(self->editWin, _T("ZTableSubclassed"), (HANDLE)1));
+            SendMessage(self->editWin, WM_SETFONT, (WPARAM) self->rowFont, 0);
+            SendMessage(self->editWin, EM_SETMARGINS,
+                        EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                        MAKELPARAM(self->textPadX - 3, self->textPadX - 3));
+        }
+        LONG style = GetWindowLong(self->editWin, GWL_STYLE);
+        style = (style & ~0x3) | (self->columns[ic].flags & 0x3);
+        SetWindowLong(self->editWin, GWL_STYLE, style);
+        CHECK(SetWindowText(self->editWin, self->rows[ir].items[ic].text));
+        CHECK(PostMessage(self->editWin, EM_SETMODIFY, FALSE, 0));
+        CHECK(PostMessage(self->editWin, EM_SETSEL, 0, -1));
+        self->currentEditWin = self->editWin;
     }
-    LONG style = GetWindowLong(self->editWin, GWL_STYLE);
-    style = (style & ~0x3) | (self->columns[ic].flags & 0x3);
-    SetWindowLong(self->editWin, GWL_STYLE, style);
-    CHECK(SetWindowText(self->editWin, self->rows[ir].items[ic].text));
+    ZTableNotifyParent(self, ZTN_EDITSTART, ir, ic, 0, 0, (LPVOID) self->currentEditWin);
     CHECK(MoveWindow(
-            self->editWin,
+            self->currentEditWin,
             rect.left,
             rect.top,
             rect.right - rect.left - 1,
             rect.bottom - rect.top - 1,
-            FALSE));
-    CHECK(PostMessage(self->editWin, EM_SETMODIFY, FALSE, 0));
-    ZTableNotifyParent(self, ZTN_EDITSTART, ir, ic, 0, 0, (LPVOID) self->editWin);
-    CHECK(PostMessage(self->editWin, EM_SETSEL, 0, -1));
-    ShowWindow(self->editWin, SW_SHOW);
-    SetFocus(self->editWin);
+            TRUE));
+    ShowWindow(self->currentEditWin, SW_SHOW);
+    SetFocus(self->currentEditWin);
     self->editRow = ir;
     self->editCol = ic;
     self->inEditing = TRUE;
@@ -341,7 +346,7 @@ BOOL ZTableAddNewRow(ZTableData *self) {
 BOOL ZTableCancelEditing(ZTableData *self) {
     if (self->inEditing) {
         self->inEditing = FALSE;
-        ShowWindow(self->editWin, SW_HIDE);
+        ShowWindow(self->currentEditWin, SW_HIDE);
     }
     return TRUE;
 }
@@ -391,28 +396,41 @@ BOOL ZTableDeleteRow(ZTableData *self, SHORT index) {
 BOOL ZTableEndEditing(ZTableData *self) {
     if (self->inEditing == FALSE) return TRUE;
     self->inEditing = FALSE;
-    if (SendMessage(self->editWin, EM_GETMODIFY, 0, 0)) {
-        if (ZTableNotifyParent(self, ZTN_EDITEND, self->editRow, self->editCol, 0, 0, (LPVOID) self->editWin)) {
-            SetFocus(self->editWin);
-            CHECK(PostMessage(self->editWin, EM_SETSEL, 0, -1));
-            self->inEditing = TRUE;
-            return TRUE;
-        } else {
-            LPTSTR string = self->rows[self->editRow].items[self->editCol].text;
-            INT ln = GetWindowTextLength(self->editWin);
-            CHECK(string = HeapReAlloc(processHeap, HEAP_ZERO_MEMORY, string, (ln + 1) * sizeof(TCHAR)));
-            CHECK(GetWindowText(self->editWin, string, ln + 1) || (GetLastError() == 0));
-            self->rows[self->editRow].items[self->editCol].text = string;
-            self->rows[self->editRow].items[self->editCol].textLength = ln;
-            if (self->autoMakeNewRow and self->editRow == self->nRows-1) {
+    if (self->columns[self->editCol].flags & ZTC_CUSTOMEDITOR) {
+        if (GetProp(self->currentEditWin, _T("ZTableModified"))) {
+            if (ZTableNotifyParent(self, ZTN_EDITEND, self->editRow, self->editCol, 0, 0,
+                                   (LPVOID) self->currentEditWin)) {
+                SetFocus(self->currentEditWin);
+                self->inEditing = TRUE;
+                return TRUE;
+            } else if (self->autoMakeNewRow and self->editRow == self->nRows - 1) {
                 ZTableAddNewRow(self);
             }
-            RECT rect;
-            CHECK(ZTableGetCellRect(self, &rect, self->editRow, self->editCol));
-            CHECK(InvalidateRect(self->hwnd, &rect, FALSE));
+        }
+    } else {
+        if (SendMessage(self->editWin, EM_GETMODIFY, 0, 0)) {
+            if (ZTableNotifyParent(self, ZTN_EDITEND, self->editRow, self->editCol, 0, 0, (LPVOID) self->editWin)) {
+                SetFocus(self->editWin);
+                CHECK(PostMessage(self->editWin, EM_SETSEL, 0, -1));
+                self->inEditing = TRUE;
+                return TRUE;
+            } else {
+                LPTSTR string = self->rows[self->editRow].items[self->editCol].text;
+                INT ln = GetWindowTextLength(self->editWin);
+                CHECK(string = HeapReAlloc(processHeap, HEAP_ZERO_MEMORY, string, (ln + 1) * sizeof(TCHAR)));
+                CHECK(GetWindowText(self->editWin, string, ln + 1) || (GetLastError() == 0));
+                self->rows[self->editRow].items[self->editCol].text = string;
+                self->rows[self->editRow].items[self->editCol].textLength = ln;
+                if (self->autoMakeNewRow and self->editRow == self->nRows - 1) {
+                    ZTableAddNewRow(self);
+                }
+                RECT rect;
+                CHECK(ZTableGetCellRect(self, &rect, self->editRow, self->editCol));
+                CHECK(InvalidateRect(self->hwnd, &rect, FALSE));
+            }
         }
     }
-    ShowWindow(self->editWin, SW_HIDE);
+    ShowWindow(self->currentEditWin, SW_HIDE);
     return TRUE;
 }
 
@@ -721,6 +739,7 @@ BOOL ZTableSetColumns(ZTableData *self, ZTableColumn *cols, SHORT nCols) {
         self->columns[ic].maxWidth = col->maxWidth;
         self->columns[ic].defaultWidth = col->defaultWidth;
         self->columns[ic].flags = col->flags;
+        self->columns[ic].editWin = col->editWin;
         if (ic != 0 and col->flags & ZTC_SELECTOR) {
             // Only the first column may be selector
             self->columns[ic].flags &= !ZTC_SELECTOR;
@@ -977,6 +996,12 @@ BOOL ZTableUpdateScrollInfo(ZTableData *self) {
 
 #undef CHECK
 
+LRESULT ZTable_WM_COMMAND(ZTableData *self, WPARAM wParam, LPARAM lParam) {
+    if (!self->inEditing) return DefWindowProc(self->hwnd, WM_COMMAND, wParam, lParam);
+    return ZTableNotifyParent(self, ZTN_EDITORCOMMAND, self->editRow, self->editCol,
+                              (LONG)wParam, (LONG)lParam, (LPVOID)self->currentEditWin);
+}
+
 LRESULT ZTable_WM_DESTROY(ZTableData *self, WPARAM wParam, LPARAM lParam) {
     if (self->inEditing) ZTableCancelEditing(self);
     if (self->editWin != NULL) DestroyWindow(self->editWin);
@@ -1116,7 +1141,7 @@ LRESULT ZTable_WM_LBUTTONDOWN(ZTableData *self, WPARAM wParam, LPARAM lParam) {
     if (ir < -1) return 0;
     if (ir >= 0) {
         if (ir == self->selectedRow) {
-            if (ic != -1 and (self->columns[ic].flags & ZTC_EDITABLE) and self->columns[ic].flags & (ZTC_EDITABLE | ZTC_SLOWDCLICKEDIT)) {
+            if (ic != -1 and (self->columns[ic].flags & ZTC_EDITABLE) and self->columns[ic].flags & (ZTC_EDITABLE | ZTC_DELAYCLICKEDIT)) {
                 ZTableBeginEditing(self, ir, ic);
             }
         } else {
@@ -1524,22 +1549,12 @@ LRESULT ZTable_WM_VSCROLL(ZTableData *self, WPARAM wParam, LPARAM lParam) {
     return 0;
 }
 
-#ifdef NOEDITSUBCLASS
-
-LRESULT CALLBACK ZTableEditWindowProcedure(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-#else
-LRESULT CALLBACK ZTableEditSubclassProc(
-    HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
-#endif // NOEDITSUBCLASS
+LRESULT CALLBACK ZTableEditorSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     switch (uMsg) {
-        case WM_KILLFOCUS:
-#ifdef NOEDITSUBCLASS
-            SendMessage((HWND) GetProp(hwnd, _T("ZTABLE")), ZTM_ENDEDITING, 0, 0);
-#else
-            SendMessage((HWND)dwRefData, ZTM_ENDEDITING, 0, 0);
-#endif // NOEDITSUBCLASS
-            break;
+//        case WM_KILLFOCUS:
+//            SendMessage(GetParent(hwnd), ZTM_ENDEDITING, 0, 0);
+//            break;
         case WM_GETDLGCODE:
             return DLGC_WANTALLKEYS | DLGC_WANTTAB | DLGC_WANTARROWS;
         case WM_KEYDOWN:
@@ -1549,20 +1564,15 @@ LRESULT CALLBACK ZTableEditSubclassProc(
                 case VK_RETURN:
                 case VK_UP:
                 case VK_DOWN:
-#ifdef NOEDITSUBCLASS
-                    if (!SendMessage((HWND) GetProp(hwnd, _T("ZTABLE")), WM_KEYDOWN, wParam, lParam)) return 0;
-#else
-                    if (!SendMessage((HWND)dwRefData, uMsg, wParam, lParam)) return 0;
-#endif // NOEDITSUBCLASS
+                    if (!SendMessage(GetParent(hwnd), uMsg, wParam, lParam)) return 0;
                     break;
             }
             break;
+        case WM_DESTROY:
+            RemoveProp(hwnd, _T("ZTableSubclassed"));
+            RemoveProp(hwnd, _T("ZTableModified"));
     }
-#ifdef NOEDITSUBCLASS
-    return CallWindowProc((WNDPROC) GetProp(hwnd, _T("OLDWP")), hwnd, uMsg, wParam, lParam);
-#else
-    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
-#endif // NOEDITSUBCLASS
+    return CallWindowProc((WNDPROC) GetWindowLongPtr(hwnd, GWLP_USERDATA), hwnd, uMsg, wParam, lParam);
 }
 
 INT CALLBACK ZTableDefaultSortProc(HWND hwnd, ZTableRow *row1, ZTableRow *row2, SHORT ic, LPARAM lParam) {
