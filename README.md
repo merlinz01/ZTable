@@ -2,7 +2,9 @@
 # ZTable - the better Windows table widget
 
 ZTable is a easy-to-use Win32 table window with a more data-centric focus than Windows' builtin ListView.
-Written in pure C.
+Written in pure C with API exposed via window messages.
+
+![Demo screenshot](demo.png)
 
 ## Win32 Usage
 
