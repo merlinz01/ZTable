@@ -281,40 +281,52 @@ BOOL ZTableBeginEditing(ZTableData *self, SHORT ir, SHORT ic) {
     CHECK(ZTableSeeColumn(self, ic));
     RECT rect;
     CHECK(ZTableGetCellRect(self, &rect, ir, ic));
-    if (self->columns[ic].flags & ZTC_CUSTOMEDITOR and self->columns[ic].editWin != NULL) {
-        self->currentEditWin = self->columns[ic].editWin;
-        if (!GetProp(self->currentEditWin, _T("ZTableSubclassed"))) {
-            LONG oldWndProc;
-            CHECK(oldWndProc = SetWindowLongPtr(
-                    self->currentEditWin, GWLP_WNDPROC, (LONG_PTR) ZTableEditorSubclassProc));
-            SetWindowLongPtr(self->currentEditWin, GWLP_USERDATA, oldWndProc);
-            CHECK(SetProp(self->currentEditWin, _T("ZTableSubclassed"), (HANDLE)1));
+
+    if (self->columns[ic].flags & ZTC_CUSTOMEDITOR) {
+        if (self->columns[ic].flags & ZTC_CUSTOMEDITORROW) {
+            if (self->rows[ir].items[ic].lParam != 0) {
+                self->currentEditWin = (HWND) self->rows[ir].items[ic].lParam;
+                goto ZTableBeginEditing_have_editor;
+            }
         }
-        CHECK(SetProp(self->currentEditWin, _T("ZTableModified"), (HANDLE)0));
-    } else {
-        if (self->editWin == NULL) {
-            CHECK(self->editWin = CreateWindowEx(
-                    WS_EX_CLIENTEDGE, WC_EDIT, NULL,
-                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-                    0, 0, 0, 0, self->hwnd, NULL, NULL, NULL));
-            LONG oldWndProc;
-            CHECK(oldWndProc = SetWindowLongPtr(
-                    self->editWin, GWLP_WNDPROC, (LONG_PTR) ZTableEditorSubclassProc));
-            SetWindowLongPtr(self->editWin, GWLP_USERDATA, oldWndProc);
-            CHECK(SetProp(self->editWin, _T("ZTableSubclassed"), (HANDLE)1));
-            SendMessage(self->editWin, WM_SETFONT, (WPARAM) self->rowFont, 0);
-            SendMessage(self->editWin, EM_SETMARGINS,
-                        EC_LEFTMARGIN | EC_RIGHTMARGIN,
-                        MAKELPARAM(self->textPadX - 3, self->textPadX - 3));
-        }
-        LONG style = GetWindowLong(self->editWin, GWL_STYLE);
-        style = (style & ~0x3) | (self->columns[ic].flags & 0x3);
-        SetWindowLong(self->editWin, GWL_STYLE, style);
-        CHECK(SetWindowText(self->editWin, self->rows[ir].items[ic].text));
-        CHECK(PostMessage(self->editWin, EM_SETMODIFY, FALSE, 0));
-        CHECK(PostMessage(self->editWin, EM_SETSEL, 0, -1));
-        self->currentEditWin = self->editWin;
+        goto ZTableBeginEditing_use_column_editor;
     }
+    goto ZTableBeginEditing_use_default_editor;
+
+    ZTableBeginEditing_use_column_editor:
+    if (self->columns[ic].editWin == NULL)
+        goto ZTableBeginEditing_use_default_editor;
+    self->currentEditWin = self->columns[ic].editWin;
+    goto ZTableBeginEditing_have_editor;
+
+    ZTableBeginEditing_use_default_editor:
+    if (self->editWin == NULL) {
+        CHECK(self->editWin = CreateWindowEx(
+                WS_EX_CLIENTEDGE, WC_EDIT, NULL,
+                WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL,
+                0, 0, 0, 0, self->hwnd, (HMENU)ZTABLE_EDIT_ID, NULL, NULL));
+        SendMessage(self->editWin, WM_SETFONT, (WPARAM) self->rowFont, 0);
+        SendMessage(self->editWin, EM_SETMARGINS,
+                    EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                    MAKELPARAM(self->textPadX - 3, self->textPadX - 3));
+    }
+    LONG style = GetWindowLong(self->editWin, GWL_STYLE);
+    style = (style & ~0x3) | (self->columns[ic].flags & 0x3);
+    SetWindowLong(self->editWin, GWL_STYLE, style);
+    CHECK(SetWindowText(self->editWin, self->rows[ir].items[ic].text));
+    CHECK(PostMessage(self->editWin, EM_SETMODIFY, FALSE, 0));
+    CHECK(PostMessage(self->editWin, EM_SETSEL, 0, -1));
+    self->currentEditWin = self->editWin;
+
+    ZTableBeginEditing_have_editor:
+    if (!GetProp(self->currentEditWin, _T("ZTableSubclassed"))) {
+        LONG oldWndProc;
+        CHECK(oldWndProc = SetWindowLongPtr(
+                self->currentEditWin, GWLP_WNDPROC, (LONG_PTR) ZTableEditorSubclassProc));
+        SetWindowLongPtr(self->currentEditWin, GWLP_USERDATA, oldWndProc);
+        CHECK(SetProp(self->currentEditWin, _T("ZTableSubclassed"), (HANDLE) 1));
+    }
+    CHECK(SetProp(self->currentEditWin, _T("ZTableModified"), (HANDLE) 0));
     ZTableNotifyParent(self, ZTN_EDITSTART, ir, ic, 0, 0, (LPVOID) self->currentEditWin);
     CHECK(MoveWindow(
             self->currentEditWin,
@@ -336,6 +348,8 @@ BOOL ZTableAddNewRow(ZTableData *self) {
     SIZE_T size = self->nCols * sizeof(ZTableItem);
     CHECK(r.items = (ZTableItem *) HeapAlloc(processHeap, HEAP_ZERO_MEMORY, size));
     // no need to initialize the items, as textLength is 0
+    r.textColor = CLR_DEFAULT;
+    r.hFill = NULL;
     CHECK(ZTableInsertRow(self, self->nRows, &r));
     CHECK(HeapFree(processHeap, 0, (LPVOID)r.items))
     CHECK(ZTableUpdateFilteredRows(self));
@@ -396,7 +410,7 @@ BOOL ZTableDeleteRow(ZTableData *self, SHORT index) {
 BOOL ZTableEndEditing(ZTableData *self) {
     if (self->inEditing == FALSE) return TRUE;
     self->inEditing = FALSE;
-    if (self->columns[self->editCol].flags & ZTC_CUSTOMEDITOR) {
+    if (self->currentEditWin != self->editWin) {
         if (GetProp(self->currentEditWin, _T("ZTableModified"))) {
             if (ZTableNotifyParent(self, ZTN_EDITEND, self->editRow, self->editCol, 0, 0,
                                    (LPVOID) self->currentEditWin)) {
@@ -469,7 +483,7 @@ BOOL ZTableGetCellAt(ZTableData *self, LONG x, LONG y, SHORT *ir, SHORT *ic) {
 
 BOOL ZTableGetCellRect(ZTableData *self, RECT *rect, SHORT ir, SHORT ic) {
     if (ir < -1 || ir >= self->nRows || ic < -1 || ic >= self->nCols) return FALSE;
-    if (!self->rows[ir].filtered) {
+    if (ir != -1 && !self->rows[ir].filtered) {
         rect->left = rect->top = rect->right = rect->bottom = -1;
         return TRUE;
     }
@@ -740,9 +754,9 @@ BOOL ZTableSetColumns(ZTableData *self, ZTableColumn *cols, SHORT nCols) {
         self->columns[ic].defaultWidth = col->defaultWidth;
         self->columns[ic].flags = col->flags;
         self->columns[ic].editWin = col->editWin;
-        if (ic != 0 and col->flags & ZTC_SELECTOR) {
+        if (ic != 0 and col->flags & _ZTC_SELECTOR) {
             // Only the first column may be selector
-            self->columns[ic].flags &= !ZTC_SELECTOR;
+            self->columns[ic].flags &= ~_ZTC_SELECTOR;
         }
     }
     self->nCols = nCols;
@@ -797,7 +811,9 @@ BOOL ZTableSetItemText(ZTableData *self, SHORT ir, SHORT ic, LPCWSTR text, UINT 
     ZTableItem *item = &(self->rows[ir].items[ic]);
     LPTSTR string = item->text;
     CHECK(string = HeapReAlloc(processHeap, HEAP_ZERO_MEMORY, string, (textLength + 1) * sizeof(TCHAR)));
-    CHECK(lstrcpyn(string, text, textLength + 1));
+    if (textLength != 0) {
+        CHECK(lstrcpyn(string, text, textLength + 1));
+    }
     item->text = string;
     item->textLength = (SHORT) textLength;
     RECT rect;
@@ -825,7 +841,8 @@ BOOL ZTableSetRowFiltered(ZTableData *self, SHORT ir, BOOL filtered) {
         self->rows[ir].filtered = filtered;
         CHECK(ZTableUpdateFilteredRows(self));
         CHECK(ZTableUpdateScrollInfo(self));
-        CHECK(InvalidateRect(self->hwnd, NULL, ((!filtered) || (self->nRowsFiltered == 1))));
+        RECT rect = {0, self->headerHeight, self->cWidth, self->cHeight};
+        CHECK(InvalidateRect(self->hwnd, &rect, ((!filtered) || (self->nRowsFiltered == 1))));
     }
     return TRUE;
 }
@@ -908,6 +925,12 @@ BOOL ZTableSort(ZTableData *self, ZTableSortInfo *info) {
     }
     if (self->nRowsFiltered > 1) {
         CHECK(InvalidateRect(self->hwnd, NULL, FALSE));
+    } else {
+        RECT rect;
+        CHECK(ZTableGetCellRect(self, &rect, -1, -1));
+        rect.top = rect.bottom;
+        rect.bottom = self->cHeight;
+        CHECK(InvalidateRect(self->hwnd, &rect, TRUE));
     }
     return TRUE;
 }
@@ -1137,26 +1160,27 @@ LRESULT ZTable_WM_LBUTTONDOWN(ZTableData *self, WPARAM wParam, LPARAM lParam) {
     SetFocus(self->hwnd);
     LONG x = LOWORD(lParam), y = HIWORD(lParam);
     SHORT ir, ic;
-    if (!ZTableGetCellAt(self, x, y, &ir, &ic)) return 0;
-    if (ir < -1) return 0;
-    if (ir >= 0) {
-        if (ir == self->selectedRow) {
+    if (!ZTableGetCellAt(self, x, y, &ir, &ic)) return 0; // no cell under mouse
+    if (ir < -1) return 0; // no cell under mouse
+    if (ir >= 0) { // horizontally in row area
+        if (ir == self->selectedRow) { // selected row
             if (ic != -1 and (self->columns[ic].flags & ZTC_EDITABLE) and self->columns[ic].flags & (ZTC_EDITABLE | ZTC_DELAYCLICKEDIT)) {
                 ZTableBeginEditing(self, ir, ic);
             }
-        } else {
+        } else { // not selected row
             ZTableSelect(self, ir);
             if (ic != -1 and (self->columns[ic].flags & (ZTC_EDITABLE | ZTC_SINGLECLICKEDIT)) == (ZTC_EDITABLE | ZTC_SINGLECLICKEDIT)) {
                 ZTableBeginEditing(self, ir, ic);
             }
         }
-    } else if (ic == -1) {
+    // We are in header area
+    } else if (ic == -1) { // not vertically in headers, therefore not in any cell
         return 0;
-    } else if (self->resizeCol != -1) {
+    } else if (self->resizeCol != -1) { // we were waiting for user to drag for resizing a column
         SetCapture(self->hwnd);
         self->resizeOrg = x - self->columns[self->resizeCol].width;
         self->resizing = TRUE;
-    } else if ((self->columns[ic].flags & (ZTC_DEFAULTSORT | ZTC_SELECTOR)) == ZTC_DEFAULTSORT) {
+    } else if ((self->columns[ic].flags & (ZTC_DEFAULTSORT)) == ZTC_DEFAULTSORT) { // sort column defaultly
         self->pressedHeader = ic;
         ZTableSeeColumn(self, ic);
         ZTableSortInfo si;
@@ -1165,13 +1189,20 @@ LRESULT ZTable_WM_LBUTTONDOWN(ZTableData *self, WPARAM wParam, LPARAM lParam) {
         si.reversed = -1;
         si.lParam = 0;
         ZTableSort(self, &si);
-    } else {
-        self->pressedHeader = ic;
+    } else { // just notify parent and show pressed
         ZTableSeeColumn(self, ic);
-        RECT rect;
-        ZTableGetCellRect(self, &rect, -1, ic);
-        InvalidateRect(self->hwnd, &rect, FALSE);
-        ZTableNotifyParent(self, ZTN_HEADERCLICKED, ir, ic, x, y, NULL);
+        if (!(self->columns[ic].flags & ZTC_NOHEADERCLICK)) {
+            self->pressedHeader = ic;
+            RECT rect;
+            ZTableGetCellRect(self, &rect, -1, ic);
+            InvalidateRect(self->hwnd, &rect, FALSE);
+            if (self->nRowsFiltered == 0) {
+                rect.top = rect.bottom;
+                rect.bottom = self->cHeight;
+                InvalidateRect(self->hwnd, &rect, TRUE);
+            }
+            ZTableNotifyParent(self, ZTN_HEADERCLICKED, ir, ic, x, y, NULL);
+        }
     }
     return 0;
 }
@@ -1234,7 +1265,7 @@ LRESULT ZTable_WM_MOUSEMOVE(ZTableData *self, WPARAM wParam, LPARAM lParam) {
         return 0;
     }
     ZTableGetCellRect(self, &rect, -1, ic);
-    if (!(self->columns[ic].flags & ZTC_NORESIZE | ZTC_SELECTOR) && abs(x - rect.right) < 5) {
+    if (!(self->columns[ic].flags & ZTC_NORESIZE) && abs(x - rect.right) < 5) {
         SetCursor(COLRESIZE);
         self->resizeCol = ic;
     } else {
@@ -1326,7 +1357,7 @@ LRESULT ZTable_WM_PAINT(ZTableData *self, WPARAM wParam, LPARAM lParam) {
         for (USHORT ic = 0; ic < self->nCols; ic++) {
             cell.right = cell.left + self->columns[ic].width;
             if (cell.left - self->scrollPosX <= self->cWidth and cell.right >= -self->scrollPosX) {
-                if (self->columns[ic].flags & ZTC_SELECTOR) {
+                if (self->columns[ic].flags & _ZTC_SELECTOR) {
                     SelectObject(dc, self->sc_fill);
                 } else {
                     SelectObject(dc, rowBackground);
@@ -1346,10 +1377,10 @@ LRESULT ZTable_WM_PAINT(ZTableData *self, WPARAM wParam, LPARAM lParam) {
                           cell.right,
                           cell.bottom);
                 RECT tRect = cell;
-                if (self->columns[ic].flags & ZTC_SELECTOR) {
+                if (self->columns[ic].flags & _ZTC_SELECTOR) {
                     PBYTE bmp = NULL;
                     WORD size = 0;
-                    if (row->index == self->nRows-1) {
+                    if (self->autoMakeNewRow && row->index == self->nRows-1) {
                         bmp = self->sc_newbitmap;
                         size = self->sc_newbitmapsize;
                     } else if (row->index == self->selectedRow) {
@@ -1410,17 +1441,17 @@ LRESULT ZTable_WM_PAINT(ZTableData *self, WPARAM wParam, LPARAM lParam) {
         cell.right = cell.left + self->columns[ic].width;
         if (cell.left - self->scrollPosX <= self->cWidth and cell.right >= -self->scrollPosX) {
             BYTE xd = 0, yd = 0;
-            BYTE reselFill = FALSE;
+            //BYTE reselFill = FALSE;
             if (ic == self->pressedHeader) {
                 //if (self->columns[ic].flags & ZTC_SORTABLE) {
                 xd = 1;
                 yd = 1;
                 //}
                 SelectObject(dc, self->headerFillPressed);
-                reselFill = TRUE;
+                //reselFill = TRUE;
             } else if (ic == self->hoverHeader) {
                 SelectObject(dc, self->headerFillHover);
-                reselFill = TRUE;
+                //reselFill = TRUE;
             } else {
                 SelectObject(dc, self->headerFill);
             }
@@ -1429,7 +1460,7 @@ LRESULT ZTable_WM_PAINT(ZTableData *self, WPARAM wParam, LPARAM lParam) {
                       -1,
                       cell.right,
                       self->headerHeight);
-            if (not(self->columns[ic].flags & ZTC_SELECTOR)) {
+            if (not(self->columns[ic].flags & _ZTC_SELECTOR)) {
                 RECT rect;
                 rect.left = cell.left + self->textPadX + xd;
                 rect.top = yd;

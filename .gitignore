@@ -1,0 +1,9 @@
+cmake-*/
+__pycache__/
+ZTable.cbp
+ZTable.layout
+ZTable.depend
+obj/
+sub.py
+*.dll
+.idea/

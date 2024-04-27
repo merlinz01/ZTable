@@ -31,7 +31,7 @@ typedef struct tagZTableColumn {
     USHORT minWidth;
     USHORT maxWidth;
     USHORT defaultWidth;
-    USHORT flags;
+    ULONG flags;
     HWND editWin;
 } ZTableColumn;
 
@@ -176,8 +176,12 @@ BOOL ZTableUpdateFilteredRows(ZTableData*);
 BOOL ZTableUpdateScrollInfo(ZTableData*);
 
 /*** Defines ***/
+
 /* Class name */
 #define ZTABLE_CLASSNAME _T("ZTable")
+
+/* Window ID of default editor */
+#define ZTABLE_EDIT_ID 0x10
 
 /* Window messages */
 #define ZTM_FIRST (WM_USER+0x300)
@@ -223,23 +227,26 @@ BOOL ZTableUpdateScrollInfo(ZTableData*);
 #define ZTN_EDITORCOMMAND (ZTN_FIRST-7)
 
 /* Column flags */
-#define ZTC_ALIGN_LEFT      0x0000
-#define ZTC_ALIGN_CENTER    0x0001
-#define ZTC_ALIGN_RIGHT     0x0002
-#define ZTC_EDITABLE        0x0004
-#define ZTC_DEFAULTSORT     0x0008
-#define ZTC_REVERSED        0x0010
-#define ZTC_NOTIFYDBLCLICKS 0x0020
-#define ZTC_NORESIZE        0x0040
-#define ZTC_DEFSIZEONRCLICK 0x0080
-#define ZTC_CUSTOMBG        0x0100
-#define ZTC_MULTILINE       0x0200
-#define ZTC_CUSTOMFG        0x0400
-#define ZTC_SELECTOR        0x0800
-#define ZTC_SINGLECLICKEDIT 0x1000
-#define ZTC_DELAYCLICKEDIT  0x2000
-#define ZTC_DOUBLECLICKEDIT 0x4000
-#define ZTC_CUSTOMEDITOR    0x8000
+#define ZTC_ALIGN_LEFT      0x00000
+#define ZTC_ALIGN_CENTER    0x00001
+#define ZTC_ALIGN_RIGHT     0x00002
+#define ZTC_EDITABLE        0x00004
+#define ZTC_DEFAULTSORT     0x00008
+#define ZTC_REVERSED        0x00010
+#define ZTC_NOTIFYDBLCLICKS 0x00020
+#define ZTC_NORESIZE        0x00040
+#define ZTC_DEFSIZEONRCLICK 0x00080
+#define ZTC_CUSTOMBG        0x00100
+#define ZTC_MULTILINE       0x00200
+#define ZTC_CUSTOMFG        0x00400
+#define _ZTC_SELECTOR       0x00800
+#define ZTC_SELECTOR        (_ZTC_SELECTOR | ZTC_NORESIZE | ZTC_NOHEADERCLICK)
+#define ZTC_SINGLECLICKEDIT 0x01000
+#define ZTC_DELAYCLICKEDIT  0x02000
+#define ZTC_DOUBLECLICKEDIT 0x04000
+#define ZTC_CUSTOMEDITOR    0x08000
+#define ZTC_CUSTOMEDITORROW 0x10000
+#define ZTC_NOHEADERCLICK   0x20000
 
 /*** Error enum - not implemented ***/
 /*enum ZTableError {

@@ -2,6 +2,7 @@
 # ZTable - the better Windows table widget
 
 ZTable is a easy-to-use Win32 table window with a more data-centric focus than Windows' builtin ListView.
+Written in pure C.
 
 ## Win32 Usage
 
@@ -11,7 +12,13 @@ Message and notification constants are in `ztable.h`
 
 ## Python Usage
 
-ZTable is geared toward Python usage and therefore includes a `gui32` Python class wrapper.
+ZTable is geared toward Python usage and therefore includes a Python class wrapper.
+
+### Note:
+
+The Python class uses an unpublished home-made Win32 ctypes wrapper,
+but it probably could be made to work with pywin32
+with some tweaking.
 
 Example usage:
 
@@ -122,7 +129,8 @@ class YourWindow(Toplevel):
         self.table.Sort(self.ComparisonCallback, column_index, reverse, lParam)
 
     def ComparisonCallback(self, hwnd_table, itemptr_1, itemptr_2, column_index, lParam):
-        assert lParam == 0xc0ffee, "I ordered coffee!"
+        if lParam != 0xc0ffee:
+            print("I ordered coffee!")
         text1 = itemptr_1.contents.items[column_index].text.value
         text2 = itemptr_2.contents.items[column_index].text.value
         if text1 == text2:
@@ -331,16 +339,15 @@ table.SetColumns(
 )
 ```
 
-## To Do
+## Features not implemented
 
-- Allow setting default row colors
 - Keybinding to start editing
-- Custom editing widgets - mostly done!
-- Icons and bitmaps (at least check marks) - supported a tiny bit for selector column
-- Combined custom background and text color per cell - should be easy
-- Custom borders per cell?
-- Allow text (line numbers etc) in selector column, highlighted selection there?
-- Hyperlinks?
+- Custom editing widgets - mostly done
+- Icons and bitmaps (at least check marks)? - supported sort-of for selector column
+- Allow setting default row colors?
+- Combined custom background and text color per cell
+- Custom borders per cell
+- Allow text (line numbers etc) in selector column, highlighted selection there
 
 ## License
 

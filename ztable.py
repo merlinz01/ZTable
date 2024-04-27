@@ -5,8 +5,8 @@ from gui32.backend import winapi, wintypes
 # noinspection PyUnresolvedReferences
 from gui32.window import ChildWindow
 
-# For whatever crazy reason:
-ctypes.windll.kernel32.LoadLibraryW('ZTable')
+# For whatever reason:
+assert ctypes.windll.kernel32.LoadLibraryW('ZTable')
 ZTable = ctypes.WinDLL('ZTable')
 winapi.function(ZTable, 'SetupClass', wintypes.BOOL, errcheck=winapi.ERROR_NULL)()
 
@@ -19,7 +19,7 @@ class ZTableColumn(ctypes.Structure):
         ('minWidth', wintypes.USHORT),
         ('maxWidth', wintypes.USHORT),
         ('defaultWidth', wintypes.USHORT),
-        ('flags', wintypes.USHORT),
+        ('flags', wintypes.ULONG),
         ('editWin', wintypes.HWND),
     )
 
@@ -67,6 +67,8 @@ class NM_ZTABLE(ctypes.Structure):
 
 LPNM_ZTABLE = ctypes.POINTER(NM_ZTABLE)
 
+ZTABLE_EDIT_ID = 0x10
+
 ZTN_FIRST = 0xfffffc18
 ZTN_EDITEND = ZTN_FIRST - 1
 ZTN_EDITSTART = ZTN_FIRST - 2
@@ -88,15 +90,17 @@ ZTC_DEFSIZEONRCLICK = 0x0080
 ZTC_CUSTOMBG = 0x0100
 ZTC_MULTILINE = 0x0200
 ZTC_CUSTOMFG = 0x0400
-ZTC_SELECTOR = 0x0800
+ZTC_SELECTOR = 0x20840
 ZTC_SINGLECLICKEDIT = 0x1000
 ZTC_SLOWDCLICKEDIT = 0x2000
 ZTC_DOUBLECLICKEDIT = 0x4000
 ZTC_CUSTOMEDITOR = 0x8000
+ZTC_CUSTOMEDITORROW = 0x10000
+ZTC_NOHEADERCLICK = 0x20000
 
 __all__ = [
     'ZTable',
-    'ZTN_FIRST',
+    'ZTABLE_EDIT_ID',
     'ZTN_EDITEND',
     'ZTN_EDITSTART',
     'ZTN_HEADERCLICKED',
@@ -120,6 +124,8 @@ __all__ = [
     'ZTC_DOUBLECLICKEDIT',
     'ZTC_SLOWDCLICKEDIT',
     'ZTC_CUSTOMEDITOR',
+    'ZTC_CUSTOMEDITORROW',
+    'ZTC_NOHEADERCLICK',
 ]
 
 
@@ -130,7 +136,7 @@ class ZTable(ChildWindow):
 
     def __init__(self, parent, *args, **kw):
         """ZTable main class.
-            ZTable is a homemade Win32 table window with the following features:
+            ZTable is a homemade Win32 table window with the following features and more:
                 - Columns aligned left, right, or center
                 - Resizable or fixed-width columns
                 - Double and right click and header click notifications
